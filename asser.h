@@ -3,11 +3,6 @@
 
 #include "trajectoire.h"
 
-//macro pour le calcul de valeur absolue
-#define abs(x) ((x) < 0 ? - (x) : (x))
-//macro pour le signe
-#define sgn(x) ((x) < 0 ? - (1) : (1))
-
 typedef struct
 {
 	int preced;

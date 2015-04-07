@@ -93,7 +93,7 @@ all: $(EXEC)
 $(EXEC): main.c $(FICHIERS_O) $(COMMON_H)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(SDLFLAGS)
 
-asser.o: PID.h trajectoire.h odometrie.h reglages.h
+asser.o: PID.h trajectoire.h odometrie.h reglages.h $(COMMON_DIR)/maths.h
 
 PID.o: reglages.h
 

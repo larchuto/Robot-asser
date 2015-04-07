@@ -1,3 +1,6 @@
+#include <stdio.h> //à virer
+#include "../common_code/maths.h"
+
 #include "asser.h"
 #include "PID.h"
 #include "hardware.h"
@@ -5,7 +8,7 @@
 #include "odometrie.h"
 #include "communication.h"
 #include "reglages.h"
-#include <stdio.h> //à virer
+
 #define AFFICHAGE_DEBUG 0
 
 static s_erreur erreur_alpha;

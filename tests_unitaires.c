@@ -1,3 +1,5 @@
+#include "../common_code/maths.h"
+
 #include "tests_unitaires.h"
 #include "reglages.h"
 #include "hardware.h"
