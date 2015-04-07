@@ -1,7 +1,7 @@
 #include <stdbool.h>
 #include <ctype.h>
 
-#include "../common_header/common.h"
+#include "../common_code/common.h"
 #include "../uart/text_reception.h"
 #include "reception.h"
 #include "match.h"
@@ -12,20 +12,21 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 enum state_t {
-    KEY,
-    VALUE_INT,
+    WAIT_KEY,
+    WAIT_X,
+    WAIT_Y,
     WAIT_GO,
 };
 
 static bool is_whitespace(char c);
-static enum state_t lecture_cle(char c, struct search_key_t *sk,
-    enum state_t current_state);
-static enum state_t lecture_val(char c, struct search_key_t *sk,
-    enum state_t current_state);
+enum state_t lecture_cle(char c, struct search_key_t *sk, int *x, int *y,
+                         enum state_t current_state);
+enum state_t lecture_val(char c, struct search_key_t *sk, int *val,
+                         enum state_t current_state);
 static enum state_t wait_end_of_trame(char c, struct search_key_t *sk,
     enum state_t current_state);
 
-enum {
+enum key_t {
     // valeurs
     KEY_X,
     KEY_Y,
@@ -33,8 +34,8 @@ enum {
     KEY_EXIT,
     KEY_END,
 
+    // info
     KEY_SIZE,
-
     VAL_SIZE = KEY_EXIT
 };
 
@@ -45,10 +46,6 @@ static char *keys[KEY_SIZE] = {
     [KEY_END]   = "go"
 };
 
-static int *vals[VAL_SIZE] = {&x, &y};
-
-static int index_val;
-
 ////////////////////////////////////////////////////////////////////////////////
 
 static bool is_whitespace(char c)
@@ -56,7 +53,8 @@ static bool is_whitespace(char c)
     return (c == ' ') || (c == '\t');
 }
 
-enum state_t lecture_cle(char c, struct search_key_t *sk, enum state_t current_state)
+enum state_t lecture_cle(char c, struct search_key_t *sk, int *x, int *y,
+                         enum state_t current_state)
 {
     // Lecture d'une clé
     debug("reception clé\n");
@@ -76,7 +74,7 @@ enum state_t lecture_cle(char c, struct search_key_t *sk, enum state_t current_s
     if (ret == -1) {
         debug("ERREUR, clé non trouvé: %d\n", ret);
         if (is_end(c)) {
-            return KEY;
+            return WAIT_KEY;
         } else {
             return WAIT_GO;
         }
@@ -84,27 +82,24 @@ enum state_t lecture_cle(char c, struct search_key_t *sk, enum state_t current_s
 
     // On a fini de recevoir la clé
     if (ret >= 0) {
-        debug("CLÉ TROUVÉ\n");
+        debug("CLÉ TROUVÉ : ");
+        debug((ret == KEY_X)? "x\n" : "y\n");
 
         switch (ret) {
             case KEY_X:
+                return WAIT_X;
             case KEY_Y:
-                debug((ret == KEY_X)? "x\n" : "y\n");
-
-                // gestion des entiers
-                index_val = ret;
-                *vals[index_val] = 0;
-                return VALUE_INT;
+                return WAIT_Y;
 
             case KEY_END:
                 // fin de trame
                 debug("fin de trame\n");
-                new_xy_absolu(x,y);
+                new_xy_absolu(*x,*y);
                 return WAIT_GO;
 
             case KEY_EXIT:
                 // fin du match
-                // NB: ce cas n'est pas à gérer par l'assert
+                // NB: ce cas n'est normalement pas à être géré par l'assert
                 debug("FIN DU MATCH\n");
                 match_set_etat(MATCH_FIN);
                 return current_state;
@@ -120,7 +115,8 @@ enum state_t lecture_cle(char c, struct search_key_t *sk, enum state_t current_s
     return current_state;
 }
 
-enum state_t lecture_val(char c, struct search_key_t *sk, enum state_t current_state)
+enum state_t lecture_val(char c, struct search_key_t *sk, int *val,
+                         enum state_t current_state)
 {
     // Lecture d'un entier
     debug("lecture entier\n");
@@ -130,9 +126,8 @@ enum state_t lecture_val(char c, struct search_key_t *sk, enum state_t current_s
         return current_state;
     }
 
-    int ret = read_int(c, vals[index_val]);
-    debug((index_val == KEY_X)? "x = " : "y = ");
-    debug("%d\n", *vals[index_val]);
+    int ret = read_int(c, val);
+    debug("value read: %d", *val);
 
     // la récéption n'est pas fini, on reste dans le même état
     if (ret == 0) {
@@ -140,21 +135,20 @@ enum state_t lecture_val(char c, struct search_key_t *sk, enum state_t current_s
         return current_state;
     }
 
-    // recetpion terminée
+    // reception terminée
     if (ret > 0) {
         debug("reception terminé\n");
-        debug((index_val == KEY_X)? "x = ":"y = ");
-        debug("%d\n", *vals[index_val]);
+        debug("valeur: %d\n", *val);
 
         // On se prépare à recevoir une nouvelle trame
         reset_search(sk);
-        return KEY;
+        return WAIT_KEY;
     }
 
     // erreur
     if (ret == -1) {
         debug("ERREUR, d'overflow\n");
-        *vals[index_val] = 0;
+        *val = 0;
         return WAIT_GO;
     }
     else if (ret == -2) {
@@ -163,7 +157,7 @@ enum state_t lecture_val(char c, struct search_key_t *sk, enum state_t current_s
     }
     else {
         debug("ERREUR inconnu lors de la lecture d'une valeure : %d\n", ret);
-        *vals[index_val] = 0;
+        *val = 0;
         return WAIT_GO;
     }
 }
@@ -176,7 +170,7 @@ enum state_t wait_end_of_trame(char c, struct search_key_t *sk, enum state_t cur
     if (is_end(c)) {
         // On se prépare à recevoir une nouvelle trame
         reset_search(sk);
-        return KEY;
+        return WAIT_KEY;
     }
 
     return current_state;
@@ -196,7 +190,7 @@ void uart_interrupt(char uart_char)
         to_search
     };
 
-    static enum state_t state = KEY;
+    static enum state_t state = WAIT_KEY;
 
     ////////////////////
 
@@ -209,12 +203,15 @@ void uart_interrupt(char uart_char)
 
     // on calcule l'état suivant
     switch (state) {
-        case KEY:
-            state = lecture_cle(c, &sk, state);
+        case WAIT_KEY:
+            state = lecture_cle(c, &sk, &x, &y, state);
             break;
 
-        case VALUE_INT:
-            state = lecture_val(c, &sk, state);
+        case WAIT_X:
+            state = lecture_val(c, &sk, &x, state);
+            break;
+        case WAIT_Y:
+            state = lecture_val(c, &sk, &y, state);
             break;
 
         case WAIT_GO:
@@ -225,8 +222,9 @@ void uart_interrupt(char uart_char)
 #if DEBUG
     debug("etat final : ");
     switch (state) {
-        case KEY:       debug("KEY\n");       break;
-        case VALUE_INT: debug("VALUE_INT\n"); break;
+        case WAIT_KEY:       debug("WAIT_KEY\n");       break;
+        case WAIT_X: debug("WAIT_X\n"); break;
+        case WAIT_Y: debug("WAIT_Y\n"); break;
         case WAIT_GO:   debug("WAIT_GO\n");  break;
     }
 #endif
